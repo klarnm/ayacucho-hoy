@@ -8,7 +8,8 @@ export type CategoryId =
   | "fuerza"
   | "ambiental"
   | "incendios"
-  | "delincuencia";
+  | "delincuencia"
+  | "hidrocarburos";
 
 export interface Category {
   id: CategoryId;
@@ -26,7 +27,15 @@ export const CATEGORIES: Category[] = [
   {
     id: "drogas",
     label: "Tráfico de drogas",
-    keywords: ["narcotráfico", "decomiso droga", "laboratorio clandestino", "PNP incauta droga"],
+    keywords: [
+      "narcotráfico",
+      "decomiso droga",
+      "laboratorio clandestino",
+      "PNP incauta droga",
+      "droga",
+      "marihuana",
+      "insumos químicos",
+    ],
   },
   {
     id: "terrorismo",
@@ -36,17 +45,42 @@ export const CATEGORIES: Category[] = [
   {
     id: "crimen",
     label: "Crimen organizado",
-    keywords: ["banda criminal", "organización delictiva", "extorsión", "sicariato"],
+    keywords: [
+      "banda criminal",
+      "organización delictiva",
+      "extorsión",
+      "sicariato",
+      "asesinato",
+      "detención",
+      "enfrentamiento",
+      "explosivos",
+      "muertos",
+      "heridos",
+    ],
   },
   {
     id: "mineria",
     label: "Minería ilegal",
-    keywords: ["minería ilegal", "minería informal", "interdicción minera", "dragas mineras"],
+    keywords: [
+      "minería ilegal",
+      "minería informal",
+      "interdicción minera",
+      "dragas mineras",
+      "mina",
+    ],
   },
   {
     id: "contra-estado",
     label: "Medidas contra el Estado",
-    keywords: ["protesta", "marcha", "bloqueo de vías", "enfrentamiento con policía"],
+    keywords: [
+      "protesta",
+      "marcha",
+      "bloqueo de vías",
+      "enfrentamiento con policía",
+      "manifestación",
+      "movilización",
+      "frente de defensa",
+    ],
   },
   {
     id: "fuerza",
@@ -56,17 +90,37 @@ export const CATEGORIES: Category[] = [
   {
     id: "ambiental",
     label: "Contaminación ambiental",
-    keywords: ["derrame", "relave minero", "contaminación río", "denuncia ambiental"],
+    keywords: [
+      "derrame",
+      "relave minero",
+      "contaminación río",
+      "denuncia ambiental",
+      "huayco",
+      "desastre natural",
+    ],
   },
   {
     id: "incendios",
     label: "Incendios forestales",
-    keywords: ["incendio forestal", "quema de pastizales", "brigada forestal"],
+    keywords: ["incendio forestal", "quema de pastizales", "brigada forestal", "incendio"],
   },
   {
     id: "delincuencia",
     label: "Delincuencia",
     keywords: ["robo", "asalto", "hurto", "ola de delincuencia"],
+  },
+  {
+    id: "hidrocarburos",
+    label: "Hidrocarburos y comunidades nativas",
+    keywords: [
+      "TGP",
+      "Pluspetrol",
+      "Megantoni",
+      "comunidad nativa",
+      "derrame de gas",
+      "gasoducto",
+      "consulta previa",
+    ],
   },
 ];
 
@@ -116,4 +170,8 @@ export const PRIORITY_LOCATIONS = [
   "San Miguel",
   "Samugari",
   "Tambo",
+  // Megantoni (La Convención, Cusco): limítrofe con La Mar, zona VRAEM donde
+  // operan TGP/Pluspetrol y hay comunidades nativas — relevante para la
+  // categoría de hidrocarburos aunque administrativamente no sea Ayacucho.
+  "Megantoni",
 ];
