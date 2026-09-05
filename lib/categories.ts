@@ -40,7 +40,7 @@ export const CATEGORIES: Category[] = [
   {
     id: "terrorismo",
     label: "Terrorismo",
-    keywords: ["Sendero Luminoso", "remanentes terroristas", "atentado VRAEM"],
+    keywords: ["Sendero Luminoso", "remanentes terroristas", "atentado VRAEM", "ANFASEP"],
   },
   {
     id: "crimen",
@@ -80,12 +80,13 @@ export const CATEGORIES: Category[] = [
       "manifestación",
       "movilización",
       "frente de defensa",
+      "ASFAH",
     ],
   },
   {
     id: "fuerza",
     label: "Medidas de fuerza",
-    keywords: ["huelga", "paro", "plantón", "toma de local"],
+    keywords: ["huelga", "paro", "plantón", "toma de local", "gremio"],
   },
   {
     id: "ambiental",
