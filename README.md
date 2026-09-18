@@ -11,6 +11,11 @@ conforme llegan (streaming).
 - **Redes sociales (Facebook, X, Instagram)**: Google Custom Search API.
   Requiere una API key gratuita de Google (ver `.env.example`). Si no la
   configuras, la app simplemente no muestra esos resultados — no se rompe.
+- **Facebook de fuentes vetadas**: Bright Data trae directo los posts de las
+  páginas de Facebook en `KNOWN_SOCIAL_PAGES` (lib/categories.ts), sin
+  depender de que Google las haya indexado — Google indexa muy mal Facebook.
+  Requiere `BRIGHTDATA_API_TOKEN` (ver más abajo). Sin ella, simplemente no
+  aporta estos resultados extra.
 - **10 categorías**: corrupción, tráfico de drogas, terrorismo, crimen
   organizado, minería ilegal, medidas contra el Estado, medidas de fuerza,
   contaminación ambiental, incendios forestales, delincuencia.
@@ -44,12 +49,28 @@ conviene:
 - Cachear resultados por categoría unos minutos (ej. con Redis o `revalidate`), o
 - Subir a un plan de pago de Google ($5 por 1000 queries).
 
+## Configurar Bright Data (opcional, para posts reales de Facebook)
+
+1. Cuenta gratis en [brightdata.com](https://brightdata.com) — da 5,000
+   créditos/mes gratis, sin tarjeta.
+2. En Scrapers Library, activa "Facebook - Pages Posts by Profile URL".
+3. Copia tu API key (Account settings) y ponla en `.env.local` como
+   `BRIGHTDATA_API_TOKEN`.
+4. **Rota la key si alguna vez la compartiste en texto plano** (captura,
+   chat, etc.) — Bright Data permite generar una nueva sin perder la cuenta.
+
+Con las páginas de `KNOWN_SOCIAL_PAGES` (9 páginas, 5 posts c/u, refrescando
+cada 12h) el gasto es de ~2,700 créditos/mes — dentro del plan gratis. Si
+agregas más páginas a esa lista, vigila el consumo en el dashboard de Bright
+Data. Los "groups/..." de esa lista no aplican aquí (necesitan el dataset de
+grupos, no el de páginas).
+
 ## Deploy en Vercel
 
 1. Sube este proyecto a un repo de GitHub.
 2. Entra a vercel.com → "Add New Project" → importa el repo.
-3. En "Environment Variables" agrega `GOOGLE_CSE_API_KEY` y `GOOGLE_CSE_CX`
-   (si los vas a usar).
+3. En "Environment Variables" agrega `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`
+   y `BRIGHTDATA_API_TOKEN` (los que vayas a usar).
 4. Deploy. Listo — el plan gratis (Hobby) alcanza para empezar.
 
 ## Ver quién usa la app / bloquear IPs

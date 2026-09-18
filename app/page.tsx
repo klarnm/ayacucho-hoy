@@ -48,8 +48,12 @@ export default function Home() {
 
     es.addEventListener("item", (e) => {
       const item: ResultItem = JSON.parse(e.data);
-      if (seenIds.current.has(item.id)) return;
-      seenIds.current.add(item.id);
+      // Dedupe por link, no por id: la misma noticia puede matchear varias
+      // keywords de una categoría (ej. "Sendero Luminoso" y "atentado
+      // VRAEM"), y cada match genera un id distinto para el mismo artículo.
+      const dedupeKey = `${item.categoryId}-${item.link}`;
+      if (seenIds.current.has(dedupeKey)) return;
+      seenIds.current.add(dedupeKey);
       setItems((prev) =>
         [...prev, item].sort(
           (a, b) =>
@@ -164,6 +168,32 @@ export default function Home() {
           </span>
         </div>
       </header>
+
+      {loading && (
+        <div
+          style={{
+            background: "var(--accent)",
+            borderBottom: "2px solid var(--ink)",
+            padding: "14px 20px",
+          }}
+        >
+          <p
+            style={{
+              maxWidth: 720,
+              margin: "0 auto",
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontWeight: 700,
+              fontSize: 15,
+              color: "white",
+              textAlign: "center",
+              lineHeight: 1.4,
+            }}
+          >
+            🔎 Buscando en Facebook — puede tardar hasta 5 minutos la primera
+            vez. Después queda guardado unas horas y carga al toque.
+          </p>
+        </div>
+      )}
 
       <nav
         style={{

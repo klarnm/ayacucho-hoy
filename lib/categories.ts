@@ -230,4 +230,7 @@ export const KNOWN_SOCIAL_PAGES = [
   "diariojornada",
   "Canal33Ayacucho",
   "ComunicaNoticiasAyacucho",
+  // Frente de Defensa Ayna San Francisco: la página no tiene slug de texto,
+  // solo id numérico (sacado del og:url real detrás de un link de share).
+  "61560211021445",
 ];

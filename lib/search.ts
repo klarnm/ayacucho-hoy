@@ -123,6 +123,21 @@ function normalize(s: string): string {
     .replace(/[̀-ͯ]/g, ""); // quita tildes
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Busca `term` (ya normalizado o no) dentro de `normText` (ya normalizado)
+// respetando límites de palabra, para que un término corto como "mina" o
+// "robo" no matchee adentro de "eliminado", "terminó" o "aprobó". Las
+// frases de varias palabras usan substring normal — chocar de casualidad
+// con una frase de varias palabras es prácticamente imposible.
+function includesTerm(normText: string, term: string): boolean {
+  const normTerm = normalize(term);
+  if (normTerm.includes(" ")) return normText.includes(normTerm);
+  return new RegExp(`\\b${escapeRegExp(normTerm)}\\b`).test(normText);
+}
+
 const NORM_AYACUCHO = normalize("Ayacucho");
 
 // Filtro de contenido propio: aparte de lo que Google decida que es
@@ -134,8 +149,7 @@ const NORM_AYACUCHO = normalize("Ayacucho");
 function mentionsAyacuchoOrVraem(text: string): boolean {
   const normText = normalize(text);
   return PRIORITY_LOCATIONS.some((loc) => {
-    const normLoc = normalize(loc);
-    if (!normText.includes(normLoc)) return false;
+    if (!includesTerm(normText, loc)) return false;
     if (AMBIGUOUS_LOCATIONS.includes(loc)) return normText.includes(NORM_AYACUCHO);
     return true;
   });
@@ -147,7 +161,7 @@ function mentionsAyacuchoOrVraem(text: string): boolean {
 // explícitamente una ubicación.
 function mentionsKnownSource(text: string): boolean {
   const normText = normalize(text);
-  return KNOWN_SOCIAL_SOURCES.some((s) => normText.includes(normalize(s)));
+  return KNOWN_SOCIAL_SOURCES.some((s) => includesTerm(normText, s));
 }
 
 // Se descarta si el texto nombra explícitamente otro país, aunque también
@@ -156,12 +170,12 @@ function mentionsKnownSource(text: string): boolean {
 // Aires, estado Sucre en Venezuela) que un dominio genérico no delata.
 function mentionsForeignCountry(text: string): boolean {
   const normText = normalize(text);
-  return COUNTRY_EXCLUSIONS.some((c) => normText.includes(normalize(c)));
+  return COUNTRY_EXCLUSIONS.some((c) => includesTerm(normText, c));
 }
 
 function mentionsPeru(text: string): boolean {
   const normText = normalize(text);
-  return normText.includes(normalize("Peru")) || normText.includes(normalize("Perú"));
+  return includesTerm(normText, "Peru") || includesTerm(normText, "Perú");
 }
 
 // Dominio peruano (.pe): confiamos en que "Ayacucho" a secas basta, porque
@@ -282,6 +296,12 @@ function extractMedia(it: any): { imageUrl?: string; isVideo?: boolean } {
   return { imageUrl, isVideo };
 }
 
+// Cache propio en memoria por query (ver el mismo cache de Bright Data más
+// abajo para el porqué: next:{revalidate} no estaba evitando llamadas
+// repetidas en la práctica).
+const googleCseCache = new Map<string, { items: ResultItem[]; fetchedAt: number }>();
+const GOOGLE_CSE_CACHE_MS = 60 * 60 * 3 * 1000; // 3h
+
 // --- Google Custom Search API: requiere API key + CX. Cubre redes sociales vía site: ---
 // Una sola consulta por categoría (todas las keywords y las 3 redes combinadas con OR)
 // para no agotar la cuota gratis de 100 consultas/día.
@@ -306,17 +326,22 @@ async function searchSocial(categoryId: CategoryId, keywords: string[]): Promise
   // resultados. El filtro de país solo aplica a medios locales (Google News).
   const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${q}&dateRestrict=d5&num=10`;
 
+  // Cache de 3h por query: con 10 categorías, como máximo 10 consultas
+  // nuevas cada 3h (80/día) sin importar cuántas visitas reciba la página —
+  // nunca se pasa de las 100 consultas/día gratis de Google.
+  const cached = googleCseCache.get(url);
+  if (cached && Date.now() - cached.fetchedAt < GOOGLE_CSE_CACHE_MS) {
+    return cached.items;
+  }
+
   try {
-    // Cache de 3h: con 10 categorías, como máximo 10 consultas nuevas cada 3h
-    // (80/día) sin importar cuántas visitas reciba la página — nunca se pasa
-    // de las 100 consultas/día gratis de Google, sin importar el tráfico.
-    const res = await fetch(url, { next: { revalidate: 60 * 60 * 3 } });
+    const res = await fetch(url);
     if (!res.ok) return [];
     const json = await res.json();
     const items = json.items ?? [];
     const category = CATEGORY_MAP[categoryId];
 
-    return items
+    const results = items
       .map((it: any, i: number): ResultItem | null => {
         const sourceType = detectSourceType(it.link ?? "");
         if (sourceType === "medio") return null; // no era ninguna de las 3 redes
@@ -344,20 +369,200 @@ async function searchSocial(categoryId: CategoryId, keywords: string[]): Promise
         };
       })
       .filter((x: ResultItem | null): x is ResultItem => x !== null);
+    googleCseCache.set(url, { items: results, fetchedAt: Date.now() });
+    return results;
   } catch {
     return [];
   }
 }
 
+// --- Bright Data: API paga con 5,000 créditos gratis/mes. Trae los posts
+// reales de nuestras páginas de Facebook ya vetadas (KNOWN_SOCIAL_PAGES),
+// sin depender de que Google las haya indexado. Requiere BRIGHTDATA_API_TOKEN. ---
+const BRIGHTDATA_DATASET_ID = "gd_lkaxegm826bjpoo9m5"; // Facebook - Pages Posts by Profile URL
+
+// Este dataset de Bright Data es solo para páginas/perfiles, no grupos — los
+// "groups/..." de KNOWN_SOCIAL_PAGES quedan fuera hasta que conectemos el
+// dataset específico de grupos.
+const BRIGHTDATA_PAGE_SLUGS = KNOWN_SOCIAL_PAGES.filter((slug) => !slug.startsWith("groups/"));
+
+// fetch() sin límite propio puede quedarse esperando para siempre si hay un
+// problema de red puntual — pasó en vivo: el poll de abajo revisa el reloj
+// ANTES de cada intento, pero un fetch ya colgado nunca deja que ese chequeo
+// se repita. Con AbortController, cada llamada individual tiene su propio
+// tope y el loop puede seguir aunque un intento se cuelgue.
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Bright Data no siempre responde rápido: medido en vivo con las 9 páginas
+// reales, el trigger responde {snapshot_id} a los ~61s (es el propio límite
+// interno de Bright Data para intentar responder sincrónico), y el scrape
+// completo termina ~132s después de empezar (45 posts, 0 errores). Este
+// poll espera hasta 200s en total antes de rendirse (falla silenciosa,
+// igual que el resto de las fuentes) — coordinado con maxDuration en
+// app/api/search/route.ts.
+async function pollBrightDataSnapshot(snapshotId: string, token: string): Promise<any[]> {
+  const deadline = Date.now() + 200_000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.brightdata.com/datasets/v3/progress/${snapshotId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+        15_000
+      );
+      if (!res.ok) return [];
+      const status = await res.json();
+      if (status.status === "ready") {
+        const dataRes = await fetchWithTimeout(
+          `https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}?format=json`,
+          { headers: { Authorization: `Bearer ${token}` } },
+          30_000
+        );
+        if (!dataRes.ok) return [];
+        const posts = await dataRes.json();
+        return Array.isArray(posts) ? posts : [];
+      }
+      if (status.status === "failed") return [];
+    } catch {
+      // timeout o error de red puntual en este intento: se reintenta en la
+      // siguiente vuelta del loop, mientras siga dentro del deadline.
+    }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  return [];
+}
+
+// Se llama UNA sola vez por carga de página (no una vez por categoría) para
+// no multiplicar el gasto de créditos: 9 páginas x 5 posts x 2 veces/día x 30
+// días ≈ 2,700 registros/mes, dentro del límite gratis de 5,000.
+//
+// Cache de 3h, igual que searchSocial (Google CSE): dentro de esa ventana,
+// esta misma llamada devuelve el {snapshot_id} ya cacheado (que a esas
+// alturas ya está "ready"), así que el poll de arriba resuelve casi
+// instantáneo. Solo la primera vez, o justo cuando el cache vence, puede
+// tardar los ~50s completos.
+//
+// Cache propio en memoria: probado en vivo (dev Y build de producción local)
+// que next:{revalidate} de Next.js NO estaba evitando una llamada nueva a
+// Bright Data en cada request — dos cargas seguidas tardaron casi lo mismo
+// (95s vs 103s), cuando la segunda debía ser instantánea. En vez de
+// depender de ese mecanismo, guardamos el resultado en una variable del
+// módulo con su propia marca de tiempo: mientras el proceso del servidor
+// siga vivo (mismo warm start en Vercel, o el mismo proceso en local),
+// cualquier request dentro de las 3h siguientes reusa esto sin llamar a
+// Bright Data. No es un cache compartido entre instancias distintas de
+// Vercel bajo mucho tráfico, pero es mucho más confiable que lo que
+// probamos, y es exactamente lo que evita el "F5 = esperar de nuevo".
+let brightDataCache: { posts: any[]; fetchedAt: number } | null = null;
+const BRIGHTDATA_CACHE_MS = 60 * 60 * 3 * 1000; // 3h
+
+async function fetchBrightDataPosts(): Promise<any[]> {
+  const token = process.env.BRIGHTDATA_API_TOKEN;
+  if (!token || BRIGHTDATA_PAGE_SLUGS.length === 0) return [];
+
+  if (brightDataCache && Date.now() - brightDataCache.fetchedAt < BRIGHTDATA_CACHE_MS) {
+    return brightDataCache.posts;
+  }
+
+  const input = BRIGHTDATA_PAGE_SLUGS.map((slug) => ({
+    url: `https://www.facebook.com/${slug}/`,
+    num_of_posts: 5,
+  }));
+  const url = `https://api.brightdata.com/datasets/v3/scrape?dataset_id=${BRIGHTDATA_DATASET_ID}&notify=false&include_errors=true`;
+
+  try {
+    // Medido en vivo: Bright Data espera hasta ~61s antes de rendirse y
+    // devolver {snapshot_id} en vez de los posts directo — es su propio
+    // límite interno, no el nuestro. 60s de timeout propio competía contra
+    // eso y a veces lo mataba justo antes de que respondiera. 90s da margen
+    // real por encima de ese umbral.
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ input }),
+      },
+      90_000
+    );
+    if (!res.ok) return [];
+    const body = await res.json();
+    const posts: any[] = Array.isArray(body)
+      ? body
+      : body?.snapshot_id
+      ? await pollBrightDataSnapshot(body.snapshot_id, token)
+      : [];
+    if (posts.length > 0) brightDataCache = { posts, fetchedAt: Date.now() };
+    return posts;
+  } catch {
+    return [];
+  }
+}
+
+// Filtra los posts ya traídos de Bright Data por las keywords de una
+// categoría. No pasa por isAboutAyacucho: estas páginas ya son fuentes
+// vetadas de Ayacucho (igual que KNOWN_SOCIAL_PAGES en searchSocial), así
+// que un post suyo cuenta con que mencione la keyword de la categoría.
+function matchBrightDataPosts(
+  posts: any[],
+  categoryId: CategoryId,
+  keywords: string[]
+): ResultItem[] {
+  const category = CATEGORY_MAP[categoryId];
+  return posts
+    .map((post: any): ResultItem | null => {
+      const content: string = post.content ?? "";
+      if (!content) return null;
+      const normContent = normalize(content);
+      if (!keywords.some((k) => includesTerm(normContent, k))) return null;
+      const publishedAt = post.date_posted
+        ? new Date(post.date_posted).toISOString()
+        : new Date().toISOString();
+      if (!isRecent(publishedAt)) return null;
+      const attachment = Array.isArray(post.attachments) ? post.attachments[0] : undefined;
+      const postId = String(post.post_id ?? post.url ?? "");
+      return {
+        id: `${categoryId}-facebook-bd-${postId}`,
+        title: content.slice(0, 100),
+        summary: content.slice(0, 220),
+        link: String(post.url ?? post.page_url ?? ""),
+        source: post.page_name ?? "Facebook",
+        sourceType: "facebook",
+        categoryId,
+        categoryLabel: category.label,
+        publishedAt,
+        imageUrl: post.post_image ?? attachment?.url,
+        isVideo: post.post_type === "Video" || attachment?.type === "Video",
+      };
+    })
+    .filter((x: ResultItem | null): x is ResultItem => x !== null);
+}
+
 /**
  * Genera todas las tareas de búsqueda para las categorías pedidas: una por
- * keyword para medios (Google News, gratis) y una sola por categoría para
- * redes sociales (Custom Search, cuota limitada). El caller puede ir
+ * keyword para medios (Google News, gratis), una sola por categoría para
+ * redes sociales (Custom Search, cuota limitada), y los posts de Bright Data
+ * (traídos una sola vez y repartidos por categoría). El caller puede ir
  * consumiendo conforme resuelven (usar Promise con .then individual, no
  * Promise.all, para lograr streaming real).
  */
 export function buildSearchTasks(categoryIds: CategoryId[]): Promise<ResultItem[]>[] {
   const tasks: Promise<ResultItem[]>[] = [];
+  const brightDataPosts = fetchBrightDataPosts();
 
   for (const categoryId of categoryIds) {
     const category = CATEGORY_MAP[categoryId];
@@ -365,6 +570,7 @@ export function buildSearchTasks(categoryIds: CategoryId[]): Promise<ResultItem[
       tasks.push(searchGoogleNews(categoryId, keyword));
     }
     tasks.push(searchSocial(categoryId, category.keywords));
+    tasks.push(brightDataPosts.then((posts) => matchBrightDataPosts(posts, categoryId, category.keywords)));
   }
   return tasks;
 }

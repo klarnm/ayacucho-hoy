@@ -3,7 +3,19 @@ import { CATEGORIES, type CategoryId } from "@/lib/categories";
 import { buildSearchTasks } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// Medido en vivo con las 9 páginas reales de KNOWN_SOCIAL_PAGES: Bright Data
+// tarda ~132s en total (trigger + scrape completo). El peor caso posible con
+// los timeouts de lib/search.ts es 90s (trigger) + 200s (poll) = 290s.
+//
+// 300s es el TECHO DURO de Vercel — ni el plan de pago lo pasa para este
+// tipo de función. 290 da el margen máximo posible por debajo de eso.
+//
+// OJO: esto solo funciona si el proyecto tiene "Fluid Compute" activo (hasta
+// 300s) — es el default en proyectos nuevos desde abril 2025. Si el proyecto
+// es más viejo o lo tiene desactivado, el límite real es 60s y esta función
+// se cortaría antes de que Bright Data termine. Revisa Project Settings →
+// Functions en Vercel para confirmar.
+export const maxDuration = 290;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
