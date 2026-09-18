@@ -1,0 +1,60 @@
+:root {
+  --ink: oklch(20% 0.01 80);
+  --bg: oklch(98% 0.01 80);
+  --accent: oklch(68% 0.16 55);
+  --muted: oklch(45% 0.01 80);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", sans-serif;
+  background-image: linear-gradient(
+    to right,
+    oklch(93% 0.01 80) 1px,
+    transparent 1px
+  );
+}
+
+a {
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.card-in {
+  opacity: 0;
+  animation: cardIn 0.45s ease both;
+}
+
+.pulse-dot {
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
