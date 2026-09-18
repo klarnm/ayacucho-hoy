@@ -3,6 +3,8 @@ import {
   AMBIGUOUS_LOCATIONS,
   CATEGORY_MAP,
   COUNTRY_EXCLUSIONS,
+  KNOWN_SOCIAL_PAGES,
+  KNOWN_SOCIAL_SOURCES,
   PRIORITY_LOCATIONS,
   SOCIAL_SOURCES,
   type CategoryId,
@@ -38,6 +40,34 @@ const locationGroup = [
 // todas las búsquedas, para no confundir localidades de Ayacucho con lugares
 // del extranjero que se llaman igual.
 const exclusionGroup = COUNTRY_EXCLUSIONS.map((c) => `-${c}`).join(" ");
+
+// Nombre de organizaciones conocidas (ver KNOWN_SOCIAL_SOURCES): cuenta como
+// alternativa a mencionar una ubicación, porque Google indexa mucho mejor
+// una página de Facebook específica que ya conoce que una búsqueda genérica
+// por keyword+ubicación sobre todo el dominio.
+const knownSourcesGroup = KNOWN_SOCIAL_SOURCES.map((s) => `"${s}"`).join(" OR ");
+const socialLocationGroup = knownSourcesGroup
+  ? `${locationGroup} OR ${knownSourcesGroup}`
+  : locationGroup;
+
+// Páginas/grupos de Facebook conocidos (ver KNOWN_SOCIAL_PAGES): al tener la
+// URL exacta, se buscan con site:facebook.com/<slug> en vez de depender de
+// keyword+ubicación — son fuentes locales ya vetadas, así que cualquier post
+// reciente de ellas cuenta, no solo los que mencionan una ubicación puntual.
+const knownPagesGroup = KNOWN_SOCIAL_PAGES.map((slug) => `site:facebook.com/${slug}`).join(
+  " OR "
+);
+
+function isFromKnownPage(link: string): boolean {
+  try {
+    const url = new URL(link);
+    if (!url.hostname.replace(/^www\./, "").endsWith("facebook.com")) return false;
+    const path = url.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+    return KNOWN_SOCIAL_PAGES.some((slug) => path === slug || path.startsWith(`${slug}/`));
+  } catch {
+    return false;
+  }
+}
 
 function isRecent(dateStr: string): boolean {
   const d = new Date(dateStr);
@@ -111,6 +141,15 @@ function mentionsAyacuchoOrVraem(text: string): boolean {
   });
 }
 
+// Igual que mentionsAyacuchoOrVraem pero para organizaciones conocidas (ver
+// KNOWN_SOCIAL_SOURCES): un post de una de estas páginas cuenta como
+// relevante aunque el snippet truncado de Google no llegue a mencionar
+// explícitamente una ubicación.
+function mentionsKnownSource(text: string): boolean {
+  const normText = normalize(text);
+  return KNOWN_SOCIAL_SOURCES.some((s) => normText.includes(normalize(s)));
+}
+
 // Se descarta si el texto nombra explícitamente otro país, aunque también
 // mencione Ayacucho/VRAEM: hay lugares homónimos en el extranjero (avenida
 // "Gran Mariscal de Ayacucho" en Caracas, partido de Ayacucho en Buenos
@@ -120,8 +159,42 @@ function mentionsForeignCountry(text: string): boolean {
   return COUNTRY_EXCLUSIONS.some((c) => normText.includes(normalize(c)));
 }
 
-function isAboutAyacucho(text: string): boolean {
-  return mentionsAyacuchoOrVraem(text) && !mentionsForeignCountry(text);
+function mentionsPeru(text: string): boolean {
+  const normText = normalize(text);
+  return normText.includes(normalize("Peru")) || normText.includes(normalize("Perú"));
+}
+
+// Dominio peruano (.pe): confiamos en que "Ayacucho" a secas basta, porque
+// ya sabemos que el medio es de Perú.
+//
+// Dominios genéricos que también se tratan como confiables aunque no sean
+// .pe: medios grandes reales que sí cubren Perú/Ayacucho de verdad. Sin
+// esto, exigir "Perú" en el texto para todo dominio no-.pe filtraba ~1 de
+// cada 4 resultados legítimos de Infobae (probado en vivo) para evitar un
+// puñado de falsos positivos raros — mal negocio. Solo los dominios
+// genéricos que NO están en esta lista (los realmente desconocidos) quedan
+// bajo el requisito estricto de que el texto diga "Perú".
+const TRUSTED_GENERIC_DOMAINS = ["infobae.com"];
+
+function isTrustedPeruDomain(link: string): boolean {
+  try {
+    const host = new URL(link).hostname.toLowerCase().replace(/^www\./, "");
+    return host.endsWith(".pe") || TRUSTED_GENERIC_DOMAINS.includes(host);
+  } catch {
+    return false;
+  }
+}
+
+// trustedDomain=true (medio .pe, o ya viene de una fuente vetada) confía en
+// que "Ayacucho" a secas basta. Si no, "Ayacucho" es más ambiguo de lo que
+// parece: es nombre de calle en casi toda ciudad argentina y aparece en
+// planes militares venezolanos (por la misma batalla), sin que el texto
+// diga el país — así que para dominios genéricos exigimos además que el
+// texto confirme "Perú" explícitamente.
+function isAboutAyacucho(text: string, trustedDomain: boolean): boolean {
+  if (mentionsForeignCountry(text)) return false;
+  if (!mentionsAyacuchoOrVraem(text) && !mentionsKnownSource(text)) return false;
+  return trustedDomain || mentionsPeru(text);
 }
 
 // Clasifica por dominio real del link, sin importar de qué búsqueda vino
@@ -179,7 +252,7 @@ async function searchGoogleNews(
           !link ||
           !isRecent(pubDate) ||
           isForeignDomain(sourceUrl) ||
-          !isAboutAyacucho(`${title} ${fullSummary}`)
+          !isAboutAyacucho(`${title} ${fullSummary}`, isTrustedPeruDomain(sourceUrl))
         )
           return null;
         return {
@@ -219,7 +292,14 @@ async function searchSocial(categoryId: CategoryId, keywords: string[]): Promise
 
   const domains = SOCIAL_SOURCES.map((s) => `site:${s.domain}`).join(" OR ");
   const kw = keywords.map((k) => `"${k}"`).join(" OR ");
-  const q = encodeURIComponent(`(${domains}) (${kw}) (${locationGroup}) ${exclusionGroup}`);
+  // Un post cuenta si viene de cualquier red social Y menciona una ubicación
+  // válida, O si viene de una de nuestras páginas ya vetadas (KNOWN_SOCIAL_PAGES) —
+  // estas últimas no necesitan mencionar ubicación porque ya son fuentes
+  // locales de Ayacucho.
+  const sourceGroup = knownPagesGroup
+    ? `((${domains}) (${socialLocationGroup})) OR (${knownPagesGroup})`
+    : `(${domains}) (${socialLocationGroup})`;
+  const q = encodeURIComponent(`(${kw}) (${sourceGroup}) ${exclusionGroup}`);
   // Nota: NO usamos cr=countryPE aquí. Google clasifica facebook.com/x.com/
   // instagram.com como alojados en EE.UU., así que combinar site: (esos
   // dominios) con cr=countryPE (país=Perú) nunca se cumple a la vez y da 0
@@ -242,7 +322,10 @@ async function searchSocial(categoryId: CategoryId, keywords: string[]): Promise
         if (sourceType === "medio") return null; // no era ninguna de las 3 redes
         const title = it.title ?? "";
         const snippet = it.snippet ?? "";
-        if (!isAboutAyacucho(`${title} ${snippet}`)) return null;
+        // Las redes sociales nunca son dominio .pe, así que trustedDomain va
+        // en false: si no viene de una página vetada, hace falta que el
+        // texto confirme "Perú" además de la ubicación.
+        if (!isFromKnownPage(it.link ?? "") && !isAboutAyacucho(`${title} ${snippet}`, false)) return null;
         const { imageUrl, isVideo } = extractMedia(it);
         return {
           id: `${categoryId}-${sourceType}-${i}-${it.link}`,

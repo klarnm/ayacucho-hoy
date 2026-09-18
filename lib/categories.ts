@@ -175,6 +175,12 @@ export const PRIORITY_LOCATIONS = [
   // operan TGP/Pluspetrol y hay comunidades nativas — relevante para la
   // categoría de hidrocarburos aunque administrativamente no sea Ayacucho.
   "Megantoni",
+  // Kimbiri y Pichari (La Convención, Cusco): distritos del VRAEM al otro
+  // lado del río Apurímac desde Ayna/La Mar — mismo eje de narcotráfico,
+  // protestas y proyectos de infraestructura (ej. puente San Francisco
+  // Kimbiri-Ayna) aunque administrativamente sean Cusco, no Ayacucho.
+  "Kimbiri",
+  "Pichari",
 ];
 
 // Localidades cuyo nombre choca con lugares de otros países (ej. "Sucre" es
@@ -197,4 +203,31 @@ export const COUNTRY_EXCLUSIONS = [
   "Chile",
   "Argentina",
   "México",
+];
+
+// Nombres de organizaciones/páginas de Facebook conocidas y relevantes
+// (frentes de defensa, comités, municipalidades) de las que solo tenemos el
+// nombre, no la URL exacta. Se agregan como término extra (búsqueda por
+// frase) en la búsqueda de redes sociales.
+export const KNOWN_SOCIAL_SOURCES = ["Frente de Defensa Ayna San Francisco"];
+
+// Páginas/grupos de Facebook de medios y fuentes locales de Ayacucho de las
+// que sí tenemos la URL exacta (slug o id de grupo, sin "facebook.com/" ni
+// query params). Se usan con site:facebook.com/<slug> — mucho más preciso
+// que una búsqueda genérica por keyword+ubicación, porque Google ya conoce
+// e indexa estas páginas específicas. Los grupos privados/cerrados no
+// necesariamente están indexados por Google aunque los agreguemos aquí.
+export const KNOWN_SOCIAL_PAGES = [
+  "groups/ayacuchonoticia",
+  "PepaNoticiasAyacucho",
+  "groups/578185905673708",
+  "PeriodismoDigitalDFA",
+  "groups/1213283093221543",
+  "Soynoticias12",
+  "groups/1275510592646529",
+  "ContrasteAyacucho",
+  "PortalAyacuchoNoticias",
+  "diariojornada",
+  "Canal33Ayacucho",
+  "ComunicaNoticiasAyacucho",
 ];
